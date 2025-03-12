@@ -17,13 +17,14 @@
 #include "kobuki_ros_interfaces/msg/bumper_event.hpp"
 #include "kobuki_ros_interfaces/msg/sound.hpp"
 #include "move/controller.hpp"
+#include <random>
 
 using namespace std::chrono_literals;
 
 namespace move
 {
 
-Controller::Controller(): Node("controller"), state_(FORWARD), bumper_pressed_(false)
+Controller::Controller(): Node("controller"), state_(FORWARD), turn_direction_(1)
 {
   publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
   sound_publisher_ = create_publisher<kobuki_ros_interfaces::msg::Sound>("/commands/sound", 10);
@@ -31,8 +32,8 @@ Controller::Controller(): Node("controller"), state_(FORWARD), bumper_pressed_(f
     "/events/bumper", 10, std::bind(&Controller::bumper_callback, this, std::placeholders::_1));
   start_time_ = this->now(); // Guardar tiempo de inicio
   timer_ = create_wall_timer(
-    500ms, std::bind(&Controller::timer_callback, this));
-}//Crea un temporizador que ejecuta timer_callback() cada 500ms
+    50ms, std::bind(&Controller::timer_callback, this));
+}//Crea un temporizador que ejecuta timer_callback() cada 20ms
 
 void
 Controller::bumper_callback(const kobuki_ros_interfaces::msg::BumperEvent::SharedPtr msg)
@@ -41,9 +42,17 @@ Controller::bumper_callback(const kobuki_ros_interfaces::msg::BumperEvent::Share
   if (msg->state == kobuki_ros_interfaces::msg::BumperEvent::PRESSED) {
     sound_message.value = kobuki_ros_interfaces::msg::Sound::ERROR; // Sonido cuando se presiona
     RCLCPP_WARN(this->get_logger(), "Bumper presionado, cambiando a modo RETROCESO.");
-    bumper_pressed_ = true;
     state_ = BACKWARD;
     start_time_ = this->now();
+     // Selecciona la dirección de giro según el bumper presionado
+    if (msg->bumper == 0) { 
+      turn_direction_ = -1;  // Bumper izquierdo → Girar a la derecha (sentido horario)
+    } else if (msg->bumper == 2) {  
+      turn_direction_ = 1; // Bumper derecho → Girar a la izquierda (sentido antihorario)
+    } else {  
+      // Bumper central → Elegir aleatoriamente izquierda o derecha
+      turn_direction_ = (rand() % 2 == 0) ? 1 : -1;
+    }
   };
   sound_publisher_->publish(sound_message);
 }
@@ -63,7 +72,7 @@ Controller::timer_callback()
       break;
       
     case BACKWARD:
-      if (elapsed_time.seconds() < 5.0) {
+      if (elapsed_time.seconds() < 4.5) {
         message.linear.x = -0.1;  // Velocidad en m/s
         message.angular.z = 0.0; // Sin giro
         } else {
@@ -73,12 +82,11 @@ Controller::timer_callback()
         break;
         
     case TURN:
-      if (elapsed_time.seconds() < 2.0) {
+      if (elapsed_time.seconds() < 5.0) {
         message.linear.x = 0.0;  // Velocidad en m/s
-        message.angular.z = 1.57; // Con giro
+        message.angular.z = turn_direction_*0.5; // Con giro
       } else {
         state_ = FORWARD;
-        bumper_pressed_ = false;
         start_time_ = this->now();
       }
       break;
