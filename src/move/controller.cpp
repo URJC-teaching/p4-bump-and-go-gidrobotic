@@ -23,7 +23,7 @@ using namespace std::chrono_literals;
 namespace move
 {
 
-Controller::Controller(): Node("controller"), state_(BACKWARD)
+Controller::Controller(): Node("controller"), state_(FORWARD), bumper_pressed_(false)
 {
   publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
   sound_publisher_ = create_publisher<kobuki_ros_interfaces::msg::Sound>("/commands/sound", 10);
@@ -40,9 +40,11 @@ Controller::bumper_callback(const kobuki_ros_interfaces::msg::BumperEvent::Share
   auto sound_message = kobuki_ros_interfaces::msg::Sound();
   if (msg->state == kobuki_ros_interfaces::msg::BumperEvent::PRESSED) {
     sound_message.value = kobuki_ros_interfaces::msg::Sound::ERROR; // Sonido cuando se presiona
-    RCLCPP_WARN(this->get_logger(), "Bumper presionado, deteniendo el robot.");
+    RCLCPP_WARN(this->get_logger(), "Bumper presionado, cambiando a modo RETROCESO.");
+    bumper_pressed_ = true;
     state_ = BACKWARD;
-  } 
+    start_time_ = this->now();
+  };
   sound_publisher_->publish(sound_message);
 }
 
@@ -53,34 +55,36 @@ Controller::timer_callback()
   rclcpp::Duration elapsed_time = this->now() - start_time_;
   //Obtiene el tiempo actual y calcula cuántos segundos han pasado desde que el nodo inició.
   
+  
   switch (state_) {
-    case FORWARD:
-      message.linear.x = 0.5;
+    case FORWARD:  // SE puede añadir sentido de giro cuando sepamos diferenciar los bumpers
+      message.linear.x = 0.2; //Avanza
       message.angular.z = 0.0;
       break;
+      
     case BACKWARD:
       if (elapsed_time.seconds() < 5.0) {
-        message.linear.x = -0.5;  // Velocidad en m/s
+        message.linear.x = -0.1;  // Velocidad en m/s
         message.angular.z = 0.0; // Sin giro
+        } else {
+          state_ = TURN;
+          start_time_ = this->now();
         }
-      state_ = TURN;
-      break;
+        break;
+        
     case TURN:
-      if (elapsed_time.seconds() < 5.0) {
+      if (elapsed_time.seconds() < 2.0) {
         message.linear.x = 0.0;  // Velocidad en m/s
-        message.angular.z = 1.0; // Con giro
-        }
-      state_ = STOP;
+        message.angular.z = 1.57; // Con giro
+      } else {
+        state_ = FORWARD;
+        bumper_pressed_ = false;
+        start_time_ = this->now();
+      }
       break;
-    case STOP:
-      if (elapsed_time.seconds() < 3.0) {
-        message.linear.x = 0.0;  // Velocidad en m/s
-        message.angular.z = 0.0; // Sin giro
-        }
-      state_ = FORWARD;
-      break;
+      
     default:
-      message.linear.x = -0.2;
+      message.linear.x = 0.2;
       message.angular.z = 0.0;
       break;
       

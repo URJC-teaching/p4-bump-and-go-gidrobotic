@@ -44,6 +44,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Time start_time_;  // Variable para almacenar el tiempo de inicio
   MovementState state_;
+  bool bumper_pressed_;
 };
 
 }  // namespace move
